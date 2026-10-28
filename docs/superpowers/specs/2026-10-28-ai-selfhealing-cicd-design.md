@@ -18,7 +18,7 @@ observable in the Actions tab.
 
 | Decision | Choice |
 |---|---|
-| AI runtime | Headless Claude Code (`claude -p`) inside GitHub Actions runner |
+| AI runtime | **Pluggable coding-agent adapters** running headless inside the GitHub Actions runner — v1 ships Claude Code, Codex CLI, Copilot CLI, Kiro CLI; agent selected via `.ai-ci.json` |
 | Framework | Express + TypeScript, hand-rolled MVC |
 | Quality gates | Core 4: typecheck, lint-conventions, lint-antipatterns, tests |
 | Retry config | Checked-in `.ai-ci.json` |
@@ -92,25 +92,69 @@ can read:
 Two **separate** ESLint flat configs (`eslint.config.conventions.mjs`,
 `eslint.config.antipattern.mjs`) so CI logs name the failing rule category.
 
-Umbrella script `npm run gate` runs all four sequentially, stopping at the
-first failure (used by CI and by the retry loop).
+Umbrella script `npm run gate` (implemented by `scripts/run-gates.mjs`) runs
+**all four checks unconditionally and aggregates their output** into one
+report, failing if any check failed. The AI therefore sees every violation in
+a single prompt and can fix them in one round instead of burning one retry
+per gate.
 
-## 3. Retry Configuration — `.ai-ci.json`
+## 3. Agent Adapters — any coding agent can be the CI fixer
 
-Checked into the repo root; the workflow reads it before the fix loop:
+The workflow never calls an agent CLI directly. All AI invocations (feature
+implementation **and** gate fixing) go through one dispatcher script:
+
+```
+scripts/ai-agent.mjs --mode fix    --prompt-file <gate-logs.txt>
+scripts/ai-agent.mjs --mode task   --prompt "<task prompt>"
+```
+
+The dispatcher reads `.ai-ci.json` → `agent` field, picks the adapter from an
+in-file registry, verifies the adapter's required env secrets are present
+(fails fast with a clear message naming the missing var), and spawns the CLI.
+Adding a new agent = one ~15-line registry entry.
+
+### Adapter registry (v1)
+
+| Agent id | Binary | Install | Auth env | Headless invocation |
+|---|---|---|---|---|
+| `claude-code` | `claude` | `npm i -g @anthropic-ai/claude-code` | `ANTHROPIC_API_KEY` | `claude --bare -p "<prompt>" --allowedTools "Bash,Read,Edit" [--model <model>]` |
+| `codex` | `codex` | `npm i -g @openai/codex` | `OPENAI_API_KEY` | `codex exec --sandbox workspace-write --skip-git-repo-check --ephemeral "<prompt>"` |
+| `copilot` | `copilot` | `npm i -g @github/copilot` | `GITHUB_TOKEN` | `copilot -p "<prompt>" --allow-all-tools` |
+| `kiro` | `kiro-cli` | `curl -fsSL https://cli.kiro.dev/install \| bash` | `KIRO_API_KEY` | `kiro-cli chat --v3 --no-interactive --trust-all-tools "<prompt>"` |
+
+Adapter details (verified against each vendor's docs, 2026-10):
+- **claude-code:** `--bare` skips host hooks/plugins for deterministic CI runs;
+  `--allowedTools "Bash,Read,Edit"` auto-approves the tools needed to fix code.
+- **codex:** `--sandbox workspace-write` (successor of `--full-auto`) lets the
+  agent edit files; `--ephemeral` avoids persisting session files in the runner.
+- **copilot:** `--allow-all-tools` skips approval prompts; `--deny-tool` can
+  scope further. Known upstream flakiness in `-p` mode (empty output issues) —
+  adapter treats non-zero exit or empty result as a failed attempt.
+- **kiro:** API-key headless auth requires a Kiro Pro-tier subscription;
+  `--trust-all-tools` auto-approves tool calls.
+
+The `model` field in `.ai-ci.json` is passed through when the agent supports
+it (`claude --model`, `kiro --model`); adapters without model pinning ignore it.
+
+## 4. Retry Configuration — `.ai-ci.json`
+
+Checked into the repo root; the dispatcher and workflow read it before the
+fix loop:
 
 ```json
 {
+  "agent": "claude-code",
   "maxRetries": 3,
   "model": "claude-sonnet-5",
   "baseBranch": "develop"
 }
 ```
 
-Changing `maxRetries` and pushing is itself part of the demo (config is
-versioned and visible).
+Changing `maxRetries` **or swapping `agent`** and pushing is itself part of
+the demo (config is versioned and visible). The repo README documents which
+GitHub secret each agent requires.
 
-## 4. Branch Model
+## 5. Branch Model
 
 - **`main`** — stable demo app. Scaffold (app + CI) lands here first;
   `develop` branches from it afterward.
@@ -119,9 +163,9 @@ versioned and visible).
 - **PR `develop` → `main`** — gates run as a blocking check. If the AI fixes
   anything on a PR, fixes are pushed to the PR head branch, never to `main`.
 
-## 5. Workflows
+## 6. Workflows
 
-### 5.1 `demo.yml` — demo starter (`workflow_dispatch`)
+### 6.1 `demo.yml` — demo starter (`workflow_dispatch`)
 
 Inputs:
 - `mode`: `task` | `seed-bug` (default `seed-bug`)
@@ -129,8 +173,9 @@ Inputs:
   e.g. *"add GET /api/tasks?done=false filtering"*
 
 Job `implement` (runs on `develop`):
-- **task mode:** install Claude Code CLI, run `claude -p` with CLAUDE.md +
-  the task prompt, constrained to repo files; commit + push to `develop`.
+- **task mode:** run `scripts/ai-agent.mjs --mode task --prompt "<taskPrompt>"`
+  — whichever agent `.ai-ci.json` selects implements the feature, reading
+  CLAUDE.md for conventions; the dispatcher commits + pushes to `develop`.
 - **seed-bug mode:** run `node scripts/seed-bugs.mjs`, which applies a
   deterministic patch injecting known violations — one per gate, so **all 4
   gates fail** deterministically:
@@ -143,7 +188,7 @@ Job `implement` (runs on `develop`):
   `chore(demo): seed bugs for self-fix demo`. Push to `develop` — **no skip
   marker**, so the push triggers `quality-gate.yml`.
 
-### 5.2 `quality-gate.yml` — gate + self-fix loop
+### 6.2 `quality-gate.yml` — gate + self-fix loop
 
 Triggers:
 - `push` to `develop`
@@ -152,15 +197,15 @@ Triggers:
 Job `gate-and-fix` (runs on the pushed branch / PR head):
 
 ```
-read .ai-ci.json → maxRetries, model
+read .ai-ci.json → agent, maxRetries
 for attempt in 0..maxRetries:
-    run npm run gate (4 gates, capture output)
+    run npm run gate (4 gates, capture output to gate-output.txt)
     if pass: exit green ✅
     if attempt == maxRetries: exit red ❌ (retries exhausted)
-    install Claude Code CLI
-    claude -p "You are fixing CI gate failures. Follow CLAUDE.md.
-               Gate output: <captured logs>. Fix the code."
-    commit "[ai-fix attempt N/M] [skip ci]" → push to same branch
+    scripts/ai-agent.mjs --mode fix --prompt-file gate-output.txt
+      (dispatcher verifies the selected agent's secret env, runs the CLI
+       with CLAUDE.md + failure logs in the prompt)
+    commit "[ai-fix <agent> attempt N/M] [skip ci]" → push to same branch
 ```
 
 Key wiring choices:
@@ -168,30 +213,35 @@ Key wiring choices:
   the entire attempt history. No cross-workflow state passing.
 - **`[skip ci]` marker** on fix commits prevents re-triggering the workflow
   on the AI's own pushes (no recursion).
-- **Auth:** `ANTHROPIC_API_KEY` stored as a GitHub secret; exact headless CLI
-  flags verified against current docs at implementation time.
+- **Auth:** per-agent GitHub secrets (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+  `GITHUB_TOKEN`, `KIRO_API_KEY`) mapped to env only for the selected agent;
+  the dispatcher fails fast if the required secret is absent.
 - On PRs, the loop is identical; the AI pushes to the PR head branch.
 
-## 6. Demo Flow (the story told to viewers)
+## 7. Demo Flow (the story told to viewers)
 
 1. Operator runs **Demo** workflow (Actions → Run workflow → `seed-bug`).
 2. `demo.yml` injects bugs, pushes to `develop`.
-3. `quality-gate.yml` fires: gates fail (typecheck, anti-patterns, tests).
-4. AI reads `CLAUDE.md` + failure logs → fix commit
-   (`[ai-fix attempt 1/3] [skip ci]`).
+3. `quality-gate.yml` fires: all 4 gates fail.
+4. The configured agent reads `CLAUDE.md` + failure logs → fix commit
+   (`[ai-fix claude-code attempt 1/3] [skip ci]`).
 5. Gates re-run inside the same job. Repeat until green — or red after
    `maxRetries` (exhaustion is also a demo outcome).
-6. `develop` commit history shows AI-authored fix commits with attempt
-   numbers; the Actions log shows the full battle.
+6. `develop` commit history shows AI-authored fix commits with agent name and
+   attempt numbers; the Actions log shows the full battle.
+7. Swap `"agent": "codex"` in `.ai-ci.json`, seed again → a different AI
+   fights the same gates. That comparison is the demo's punchline.
 
-## 7. Out of Scope (YAGNI)
+## 8. Out of Scope (YAGNI)
 
 - Database, auth, Docker, deployment target
 - Coverage thresholds, formatter gate, SonarCloud/CodeQL
 - Issue-driven feature requests
-- Multi-AI comparison, cost tracking dashboards
+- Multi-agent parallel comparison, cost tracking dashboards
+- Fixing upstream agent-CLI bugs (e.g. Copilot `-p` empty-output flakiness);
+  the adapter surfaces them as failed attempts
 
-## 8. Success Criteria
+## 9. Success Criteria
 
 1. Pristine scaffold on `main`/`develop` passes all 4 gates green.
 2. `seed-bug` demo run: gates fail, AI fixes within `maxRetries`, final
@@ -200,4 +250,7 @@ Key wiring choices:
    (possibly after fix iterations).
 4. Changing `maxRetries` in `.ai-ci.json` changes loop behavior on the next
    run — no workflow YAML edit required.
-5. PR `develop` → `main` blocks on the gate check.
+5. Changing `agent` in `.ai-ci.json` switches which CLI runs the fix loop
+   (verified per-agent by its secret being present; absent secret fails fast
+   with a clear error before any gate cycles are burned).
+6. PR `develop` → `main` blocks on the gate check.
