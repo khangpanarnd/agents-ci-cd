@@ -1030,7 +1030,13 @@ if (mode !== 'fix' && mode !== 'task') {
   process.exit(2);
 }
 
-const config = JSON.parse(readFileSync('.ai-ci.json', 'utf8'));
+let config;
+try {
+  config = JSON.parse(readFileSync('.ai-ci.json', 'utf8'));
+} catch (err) {
+  console.error(`Cannot read .ai-ci.json: ${err.message}. Run from the repository root.`);
+  process.exit(2);
+}
 
 const RULES_PREAMBLE = [
   'You are an autonomous coding agent working in a git repository.',
@@ -1047,7 +1053,13 @@ if (mode === 'fix') {
     console.error('--prompt-file is required in fix mode');
     process.exit(2);
   }
-  const gateOutput = readFileSync(promptFile, 'utf8');
+  let gateOutput;
+  try {
+    gateOutput = readFileSync(promptFile, 'utf8');
+  } catch (err) {
+    console.error(`Cannot read prompt file ${promptFile}: ${err.message}`);
+    process.exit(2);
+  }
   prompt = `${RULES_PREAMBLE}\n\nTask: fix every quality-gate violation reported below.\n\nQuality gate output:\n${gateOutput}`;
 } else if (!taskPrompt) {
   console.error('--prompt is required in task mode');
@@ -1105,7 +1117,6 @@ if (missingEnv.length > 0) {
   process.exit(2);
 }
 
-const isWindows = process.platform === 'win32';
 const found = spawnSync('bash', ['-c', `command -v ${adapter.bin}`], { encoding: 'utf8' });
 if (found.status !== 0) {
   console.log(`Agent CLI not found — installing: ${adapter.install}`);
@@ -1114,14 +1125,31 @@ if (found.status !== 0) {
     console.error(`Failed to install the "${config.agent}" CLI`);
     process.exit(2);
   }
+  const refound = spawnSync('bash', ['-c', `command -v ${adapter.bin}`], { encoding: 'utf8' });
+  if (refound.status !== 0) {
+    console.error(
+      `The "${config.agent}" CLI installed but "${adapter.bin}" is still not on PATH. ` +
+      'Add its install directory to PATH and re-run.',
+    );
+    process.exit(2);
+  }
 }
 
 console.log(`Running agent "${config.agent}" (mode: ${mode})...`);
-const run = spawnSync(adapter.bin, adapter.buildArgs(prompt, config.model), {
+// Run through bash with the prompt as a positional argument. This gives
+// execvp-level argv quoting on Linux, and on Windows cmd.exe never sees the
+// prompt: with shell:true and the prompt in argv, cmd word-splits it and
+// executes metacharacters (&, |, %VAR%) — injectable via repo content.
+const promptPlaceholder = '"$1"';
+const commandLine = [adapter.bin, ...adapter.buildArgs(promptPlaceholder, config.model)].join(' ');
+const run = spawnSync('bash', ['-c', commandLine, 'ai-agent', prompt], {
   stdio: 'inherit',
-  shell: isWindows,
 });
 
+if (run.error) {
+  console.error(`Failed to launch agent "${config.agent}": ${run.error.message}`);
+  process.exit(2);
+}
 if (run.status !== 0) {
   console.error(`Agent "${config.agent}" exited with status ${run.status}`);
   process.exit(run.status ?? 1);
