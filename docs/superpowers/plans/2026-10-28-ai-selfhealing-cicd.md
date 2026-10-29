@@ -1301,20 +1301,22 @@ git commit -m "feat: add deterministic bug seeder for self-fix demos"
 ```bash
 #!/usr/bin/env bash
 # Quality gate + AI self-fix loop.
-# Usage: bash scripts/gate-and-fix.sh <agent-id> <max-retries>
+# Usage: bash scripts/gate-and-fix.sh <agent-id> <max-retries> [branch]
 # Environment (set by the workflow): the selected agent's API-key env var.
 # Set AI_FIX_NO_PUSH=1 to record fix commits without pushing (local dry-run).
-# On PR events GITHUB_HEAD_REF is the PR head branch; on push events
-# GITHUB_REF_NAME is the pushed branch.
+# Branch resolution: an explicit 3rd arg wins (needed for workflow_dispatch,
+# where GITHUB_REF_NAME is the branch dispatched FROM, not the checked-out
+# branch). Otherwise: PR events use GITHUB_HEAD_REF; push events use
+# GITHUB_REF_NAME.
 set -uo pipefail
 
-AGENT="${1:?usage: gate-and-fix.sh <agent-id> <max-retries>}"
-MAX_RETRIES="${2:?usage: gate-and-fix.sh <agent-id> <max-retries>}"
+AGENT="${1:?usage: gate-and-fix.sh <agent-id> <max-retries> [branch]}"
+MAX_RETRIES="${2:?usage: gate-and-fix.sh <agent-id> <max-retries> [branch]}"
 if ! [[ "${MAX_RETRIES}" =~ ^[0-9]+$ ]]; then
   echo "ERROR: max-retries must be a non-negative integer (got '${MAX_RETRIES}')" >&2
   exit 2
 fi
-BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-$(git branch --show-current)}}"
+BRANCH="${3:-${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-$(git branch --show-current)}}}"
 TOTAL=$((MAX_RETRIES + 1))
 ATTEMPT=0
 
@@ -1596,6 +1598,10 @@ jobs:
           KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
         run: |
           node scripts/ai-agent.mjs --mode task --prompt "$TASK_PROMPT"
+          if git diff --quiet HEAD && [ -z "$(git ls-files --others --exclude-standard)" ]; then
+            echo "::error::AI agent made no changes in task mode — is the prompt actionable?"
+            exit 1
+          fi
           git add -A
           git commit -m "feat(ai): implement requested task"
           git push origin HEAD:develop
@@ -1632,7 +1638,10 @@ jobs:
           KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
           AGENT_ID: ${{ steps.aiconfig.outputs.agent }}
           MAX_RETRIES: ${{ steps.aiconfig.outputs.maxRetries }}
-        run: bash scripts/gate-and-fix.sh "$AGENT_ID" "$MAX_RETRIES"
+        # The 3rd arg pins the push target to develop: on workflow_dispatch,
+        # GITHUB_REF_NAME is the branch dispatched FROM (main by default),
+        # which would otherwise route AI fix commits to main.
+        run: bash scripts/gate-and-fix.sh "$AGENT_ID" "$MAX_RETRIES" develop
 ```
 
 - [ ] **Step 2: Validate YAML locally**
@@ -1726,14 +1735,22 @@ without touching workflow YAML. (`model` is passed to claude-code only.)
 
 ## Re-running the seed demo
 
-The seeder anchors to exact source strings. After a demo the AI's fixes are
-committed on `develop`; before re-seeding, reset the app code:
+The seeder can refuse to run for two reasons: `Already seeded` (a previous
+seed was never fixed) or `Anchor not found` (the AI's fix changed an anchor
+line — after a green demo this is the usual blocker, since the fixes removed
+the seeded bugs). Both exits mean the same thing: reset the app code from
+`main` before re-seeding:
 
 ```bash
+git checkout develop
 git checkout main -- src tests
 git commit -m "chore(demo): reset app code for re-seed"
 git push
 ```
+
+Note: this restores tracked paths but does NOT delete files a task-mode
+agent added on `develop` (e.g. a new controller). Remove those manually if
+a task demo leaves something behind.
 
 ## Why the loop pushes with `[skip ci]`
 
