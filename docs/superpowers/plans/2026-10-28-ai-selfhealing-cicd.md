@@ -522,7 +522,7 @@ export const app = createApp();
 npx vitest run
 ```
 
-Expected: PASS — 6 model tests + 13 API tests, all green.
+Expected: PASS — 6 model tests + 11 API tests (17 total), all green.
 
 - [ ] **Step 7: Typecheck**
 
@@ -619,11 +619,11 @@ Expected: no output, exit 0.
 - [ ] **Step 3: Negative check — verify it catches a violation**
 
 ```bash
-printf 'export const seededConventionBug = 1;\n' > src/models/seed-bug.ts
+printf 'const seededConventionBug = 1;\n' > src/models/seed-bug.ts
 npm run lint:conventions
 ```
 
-Expected: FAIL — `@typescript-eslint/no-unused-vars` on `seededConventionBug`.
+Expected: FAIL — `@typescript-eslint/no-unused-vars` on `seededConventionBug`. (The variable must NOT be exported — exported symbols count as used.)
 
 - [ ] **Step 4: Remove the violation and re-verify**
 
@@ -1252,8 +1252,12 @@ while :; do
 
   git add -A
   git commit -m "[ai-fix ${AGENT} attempt ${FIX}/${MAX_RETRIES}] [skip ci]"
-  git push origin "HEAD:${BRANCH}"
-  echo ">>> Fix commit pushed to ${BRANCH}; re-running gates"
+  if [ "${AI_FIX_NO_PUSH:-0}" != "1" ]; then
+    git push origin "HEAD:${BRANCH}"
+  else
+    echo ">>> AI_FIX_NO_PUSH=1 — skipping push to ${BRANCH} (local dry-run)"
+  fi
+  echo ">>> Fix commit recorded for ${BRANCH}; re-running gates"
   ATTEMPT=$((ATTEMPT + 1))
 done
 ```
@@ -1267,9 +1271,9 @@ bash scripts/gate-and-fix.sh 2>&1 | head -2
 
 Expected: `syntax OK`, then a usage error (`agent id required`).
 
-- [ ] **Step 3: Local smoke of the happy path (no AI, no push)**
+- [ ] **Step 3: Local smoke of the loop control flow (no AI, no push)**
 
-Temporarily stub the agent so the loop can be exercised without an API key:
+Temporarily stub the agent so the loop can be exercised without an API key or network. `AI_FIX_NO_PUSH=1` (the guard added above) keeps the smoke test off `origin`:
 
 ```bash
 cp scripts/ai-agent.mjs scripts/ai-agent.mjs.bak
@@ -1285,13 +1289,13 @@ src = src.replace(
 );
 fs.writeFileSync('scripts/ai-agent.mjs', src);
 EOF
-git add -A && git commit -q -m "wip: temp stub for local loop test"
-bash scripts/gate-and-fix.sh stub 1
+git add -A && git commit -q -m "wip: local loop smoke (temp)"
+AI_FIX_NO_PUSH=1 ANTHROPIC_API_KEY=dummy bash scripts/gate-and-fix.sh stub 1; echo "loop-exit=$?"
 mv scripts/ai-agent.mjs.bak scripts/ai-agent.mjs
 git reset --hard HEAD~1
 ```
 
-Expected: run 1 fails gates, "agent" (stub) reverts the files, fix commit is attempted locally (push may fail offline — acceptable in this smoke test if the loop then exits non-zero on push; on a networked machine it pushes and run 2 passes). The point of this step is to prove the loop's control flow executes. If the push fails, that still demonstrates the loop reached the commit/push stage; note it and move on.
+Expected: gate run 1/2 fails, the stub "agent" reverts the seeded files, a `[ai-fix stub attempt 1/1] [skip ci]` commit is created (push skipped with the dry-run message), gate run 2/2 passes, `loop-exit=0`. The final `git reset --hard HEAD~1` drops the temp commit and restores the pristine tree. Verify with `git status --short` (clean) and `npm run gate` (ALL PASSED).
 
 - [ ] **Step 4: Restore and verify clean state**
 
