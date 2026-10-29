@@ -1,0 +1,31 @@
+{
+  "name": "agents-ci-cd",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Demo: AI agents self-fix quality-gate failures in GitHub Actions",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint:conventions": "eslint . --config eslint.config.conventions.mjs --max-warnings 0",
+    "lint:antipattern": "eslint . --config eslint.config.antipattern.mjs --max-warnings 0",
+    "test": "vitest run",
+    "gate": "node scripts/run-gates.mjs",
+    "start": "tsx src/server.ts"
+  },
+  "dependencies": {
+    "express": "^4.22.3"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.25",
+    "@types/node": "^22.20.5",
+    "@types/supertest": "^6.0.3",
+    "eslint": "^9.39.5",
+    "supertest": "^7.3.1",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^3.2.7"
+  }
+}
