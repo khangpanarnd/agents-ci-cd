@@ -1,0 +1,104 @@
+name: Demo
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Demo mode'
+        required: true
+        type: choice
+        default: seed-bug
+        options: [seed-bug, task]
+      taskPrompt:
+        description: 'Feature instruction (used in task mode)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  # Aligned with quality-gate's develop group so demo runs serialize with
+  # gate runs on the same branch instead of racing concurrent writers.
+  group: quality-gate-develop
+  cancel-in-progress: false
+
+jobs:
+  implement:
+    name: 'Mode: ${{ inputs.mode }}'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Configure git
+        run: |
+          git config user.name "ai-demo-bot"
+          git config user.email "ai-demo-bot@users.noreply.github.com"
+
+      - name: Seed bugs (seed-bug mode)
+        if: ${{ inputs.mode == 'seed-bug' }}
+        run: |
+          node scripts/seed-bugs.mjs
+          git add -A
+          git commit -m "chore(demo): seed bugs for self-fix demo"
+          git push origin HEAD:develop
+
+      - name: Implement task with AI (task mode)
+        if: ${{ inputs.mode == 'task' }}
+        env:
+          TASK_PROMPT: ${{ inputs.taskPrompt }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
+        run: |
+          node scripts/ai-agent.mjs --mode task --prompt "$TASK_PROMPT"
+          git add -A
+          git commit -m "feat(ai): implement requested task"
+          git push origin HEAD:develop
+
+  gate-and-fix:
+    name: Gates + AI self-fix loop
+    needs: implement
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Read AI config
+        id: aiconfig
+        run: |
+          echo "agent=$(jq -er '.agent' .ai-ci.json)" >> "$GITHUB_OUTPUT"
+          echo "maxRetries=$(jq -er '.maxRetries' .ai-ci.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Run gates with self-fix loop
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
+          AGENT_ID: ${{ steps.aiconfig.outputs.agent }}
+          MAX_RETRIES: ${{ steps.aiconfig.outputs.maxRetries }}
+        run: bash scripts/gate-and-fix.sh "$AGENT_ID" "$MAX_RETRIES"
