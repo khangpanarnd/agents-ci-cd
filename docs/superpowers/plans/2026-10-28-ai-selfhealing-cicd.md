@@ -881,8 +881,10 @@ the intent behind them.
 
 - `npm run gate` — run ALL quality gates (typecheck → lint:conventions →
   lint:antipattern → test). It must pass before you finish any change.
-- `npm test` — Vitest unit + API tests only.
+- `npm run typecheck`, `npm run lint:conventions`, `npm run lint:antipattern`,
+  `npm test` — run one gate alone for a faster feedback loop.
 - `npm start` — boot the API locally on port 3000.
+- `scripts/**` is excluded from the lint gates by design.
 
 ## MVC layering (Express + TypeScript)
 
@@ -896,12 +898,16 @@ the intent behind them.
 - `src/app.ts` assembles the app (exported for supertest); `src/server.ts`
   boots it.
 
-## Naming
+## Naming and parameters
 
 - Files: kebab-case with role suffix — `task.controller.ts`, `task.model.ts`,
   `task.routes.ts`, `error-handler.ts`.
 - Functions and variables: camelCase. Classes: PascalCase.
 - One exported concept per file where natural.
+- Unused parameters: prefix with `_` (e.g. `_req`, `_next`). NEVER delete a
+  parameter to silence an unused-variable error — Express middleware arity
+  is load-bearing (the error handler is recognized by its 4 parameters;
+  dropping `_next` silently breaks 500 handling).
 
 ## Error handling
 
@@ -911,13 +917,20 @@ the intent behind them.
 - Never throw from controllers on purpose; unexpected errors bubble to the
   error middleware.
 
+## Conventions gate
+
+Enforced on `src/` and `tests/`: no `var` (use `const`/`let`), `eqeqeq`,
+no unused variables, and type-only imports must use the type form:
+`import type { Request, Response } from 'express';`.
+
 ## Forbidden (anti-pattern gate)
 
 - `any` — use precise types.
-- `console.log` in `src/` (only `src/server.ts` startup logging is allowed).
+- `console.*` anywhere in `src/` or `tests/` (only `src/server.ts` may log).
 - `eval` / `new Function`.
-- Magic numbers — name them or take them from config. Whitelisted: HTTP
-  status codes, the default port 3000, and -1/0/1 primitives.
+- Magic numbers in `src/` (tests may assert on raw values). Whitelist
+  exactly: 200, 201, 204, 400, 404, 500, 3000, and -1/0/1. Name anything
+  else.
 - `async` functions without `await`.
 
 ## Testing
@@ -930,8 +943,10 @@ the intent behind them.
 ## When fixing gate failures
 
 - Make the smallest correct change.
-- NEVER weaken the gates: no `eslint-disable`, no tsconfig loosening, no
-  skipped or weakened tests.
+- NEVER weaken the gates: no `eslint-disable`, and no edits to
+  `eslint.config.conventions.mjs`, `eslint.config.antipattern.mjs`,
+  `tsconfig.json`, `vitest.config.ts`, `scripts/run-gates.mjs`, or the gate
+  scripts in `package.json`. No skipped or weakened tests.
 - Run `npm run gate` yourself and confirm it passes before finishing.
 ```
 
@@ -1022,6 +1037,7 @@ const RULES_PREAMBLE = [
   '1. Read AGENTS.md at the repository root first. It defines the project conventions you MUST follow.',
   '2. Complete the task below with the smallest correct changes.',
   '   Never disable or weaken the quality gates (tsconfig, eslint configs, tests).',
+  '   Never delete function parameters to silence unused-variable errors; rename with a `_` prefix instead.',
   '3. Run `npm run gate` and make sure it passes before you finish.',
 ].join('\n');
 
