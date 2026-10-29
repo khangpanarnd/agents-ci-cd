@@ -2,12 +2,17 @@
 # Quality gate + AI self-fix loop.
 # Usage: bash scripts/gate-and-fix.sh <agent-id> <max-retries>
 # Environment (set by the workflow): the selected agent's API-key env var.
+# Set AI_FIX_NO_PUSH=1 to record fix commits without pushing (local dry-run).
 # On PR events GITHUB_HEAD_REF is the PR head branch; on push events
 # GITHUB_REF_NAME is the pushed branch.
 set -uo pipefail
 
 AGENT="${1:?usage: gate-and-fix.sh <agent-id> <max-retries>}"
 MAX_RETRIES="${2:?usage: gate-and-fix.sh <agent-id> <max-retries>}"
+if ! [[ "${MAX_RETRIES}" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: max-retries must be a non-negative integer (got '${MAX_RETRIES}')" >&2
+  exit 2
+fi
 BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-$(git branch --show-current)}}"
 TOTAL=$((MAX_RETRIES + 1))
 ATTEMPT=0
@@ -49,15 +54,22 @@ while :; do
     exit 1
   fi
 
-  if git diff --quiet && [ ! -n "$(git ls-files --others --exclude-standard)" ]; then
+  if git diff --quiet HEAD && [ -z "$(git ls-files --others --exclude-standard)" ]; then
     echo "ERROR: agent made no changes on attempt ${FIX} — aborting" >&2
     exit 1
   fi
 
+  git status --short
   git add -A
-  git commit -m "[ai-fix ${AGENT} attempt ${FIX}/${MAX_RETRIES}] [skip ci]"
+  if ! git commit -m "[ai-fix ${AGENT} attempt ${FIX}/${MAX_RETRIES}] [skip ci]"; then
+    echo "ERROR: failed to record fix commit on attempt ${FIX}" >&2
+    exit 1
+  fi
   if [ "${AI_FIX_NO_PUSH:-0}" != "1" ]; then
-    git push origin "HEAD:${BRANCH}"
+    if ! git push origin "HEAD:${BRANCH}"; then
+      echo "ERROR: failed to push fix commit to ${BRANCH}" >&2
+      exit 1
+    fi
   else
     echo ">>> AI_FIX_NO_PUSH=1 — skipping push to ${BRANCH} (local dry-run)"
   fi
