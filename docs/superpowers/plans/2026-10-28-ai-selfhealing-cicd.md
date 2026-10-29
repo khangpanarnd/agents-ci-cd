@@ -689,6 +689,8 @@ import tseslint from 'typescript-eslint';
 // Magic numbers are only enforced in src/ (tests assert on counts/ids freely).
 // server.ts may log at startup — it is the infra entrypoint.
 // require-await is a typed rule: these blocks need parserOptions.project.
+// `...recommended` enables no-unused-vars with default options, so the `^_`
+// exemption (Express middleware arity, see conventions config) is repeated here.
 export default tseslint.config(
   { ignores: ['node_modules/**', 'dist/**', 'scripts/**'] },
   ...tseslint.configs.recommended,
@@ -709,6 +711,10 @@ export default tseslint.config(
       ],
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/require-await': 'error',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
     },
   },
   {
@@ -730,6 +736,10 @@ export default tseslint.config(
       'no-eval': 'error',
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/require-await': 'error',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
     },
   },
 );
@@ -748,11 +758,11 @@ Expected: no output, exit 0.
 - [ ] **Step 3: Negative check — verify it catches violations**
 
 ```bash
-printf 'export function seedBug(data: any): any {\n  console.log("debug", data);\n  return eval("1 + 86400");\n}\n' > src/models/seed-bug.ts
+printf 'export function seedBug(data: any): any {\n  console.log("debug", data);\n  return eval("1") + 86400;\n}\n' > src/models/seed-bug.ts
 npm run lint:antipattern
 ```
 
-Expected: FAIL — reports `no-explicit-any`, `no-console`, `no-eval`, and `no-magic-numbers` (86400).
+Expected: FAIL — reports `no-explicit-any`, `no-console`, `no-eval`, and `no-magic-numbers` (86400 must be a numeric literal in the probe — `no-magic-numbers` does not inspect string contents).
 
 - [ ] **Step 4: Remove the violation and re-verify**
 
