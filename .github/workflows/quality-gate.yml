@@ -1,0 +1,49 @@
+name: Quality Gate
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: quality-gate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate-and-fix:
+    name: Gates + AI self-fix loop
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (PR head or pushed branch)
+        uses: actions/checkout@v4
+        with:
+          # Same-repo branches only: fork PR heads are not resolvable here.
+          ref: ${{ github.head_ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Read AI config
+        id: aiconfig
+        run: |
+          echo "agent=$(jq -r '.agent' .ai-ci.json)" >> "$GITHUB_OUTPUT"
+          echo "maxRetries=$(jq -r '.maxRetries' .ai-ci.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Run gates with self-fix loop
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
+        run: bash scripts/gate-and-fix.sh "${{ steps.aiconfig.outputs.agent }}" "${{ steps.aiconfig.outputs.maxRetries }}"
