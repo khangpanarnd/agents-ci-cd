@@ -1,3 +1,6 @@
 node_modules/
 gate-output.txt
 dist/
+.claude/
+.codex/
+.kiro/

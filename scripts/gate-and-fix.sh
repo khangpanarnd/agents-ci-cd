@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
 # Quality gate + AI self-fix loop.
-# Usage: bash scripts/gate-and-fix.sh <agent-id> <max-retries>
+# Usage: bash scripts/gate-and-fix.sh <agent-id> <max-retries> [branch]
 # Environment (set by the workflow): the selected agent's API-key env var.
 # Set AI_FIX_NO_PUSH=1 to record fix commits without pushing (local dry-run).
-# On PR events GITHUB_HEAD_REF is the PR head branch; on push events
-# GITHUB_REF_NAME is the pushed branch.
+# Branch resolution: an explicit 3rd arg wins (needed for workflow_dispatch,
+# where GITHUB_REF_NAME is the branch dispatched FROM, not the checked-out
+# branch). Otherwise: PR events use GITHUB_HEAD_REF; push events use
+# GITHUB_REF_NAME.
 set -uo pipefail
 
-AGENT="${1:?usage: gate-and-fix.sh <agent-id> <max-retries>}"
-MAX_RETRIES="${2:?usage: gate-and-fix.sh <agent-id> <max-retries>}"
+AGENT="${1:?usage: gate-and-fix.sh <agent-id> <max-retries> [branch]}"
+MAX_RETRIES="${2:?usage: gate-and-fix.sh <agent-id> <max-retries> [branch]}"
 if ! [[ "${MAX_RETRIES}" =~ ^[0-9]+$ ]]; then
   echo "ERROR: max-retries must be a non-negative integer (got '${MAX_RETRIES}')" >&2
   exit 2
 fi
-BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-$(git branch --show-current)}}"
+BRANCH="${3:-${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-$(git branch --show-current)}}}"
 TOTAL=$((MAX_RETRIES + 1))
 ATTEMPT=0
 

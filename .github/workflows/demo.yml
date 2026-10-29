@@ -65,6 +65,10 @@ jobs:
           KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
         run: |
           node scripts/ai-agent.mjs --mode task --prompt "$TASK_PROMPT"
+          if git diff --quiet HEAD && [ -z "$(git ls-files --others --exclude-standard)" ]; then
+            echo "::error::AI agent made no changes in task mode — is the prompt actionable?"
+            exit 1
+          fi
           git add -A
           git commit -m "feat(ai): implement requested task"
           git push origin HEAD:develop
@@ -101,4 +105,7 @@ jobs:
           KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
           AGENT_ID: ${{ steps.aiconfig.outputs.agent }}
           MAX_RETRIES: ${{ steps.aiconfig.outputs.maxRetries }}
-        run: bash scripts/gate-and-fix.sh "$AGENT_ID" "$MAX_RETRIES"
+          # The 3rd arg pins the push target to develop: on workflow_dispatch,
+          # GITHUB_REF_NAME is the branch dispatched FROM (main by default),
+          # which would otherwise route AI fix commits to main.
+        run: bash scripts/gate-and-fix.sh "$AGENT_ID" "$MAX_RETRIES" develop
