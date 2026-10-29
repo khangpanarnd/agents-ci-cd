@@ -362,6 +362,24 @@ describe('Tasks API', () => {
       const res = await request(app).put('/api/tasks/999').send({ title: 'x' });
       expect(res.status).toBe(404);
     });
+
+    it('rejects a non-boolean done with 400', async () => {
+      const created = taskRepository.create({ title: 'Keep' });
+      const res = await request(app)
+        .put(`/api/tasks/${created.id}`)
+        .send({ done: 'banana' });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBeDefined();
+    });
+
+    it('rejects a null title with 400', async () => {
+      const created = taskRepository.create({ title: 'Keep' });
+      const res = await request(app)
+        .put(`/api/tasks/${created.id}`)
+        .send({ title: null });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBeDefined();
+    });
   });
 
   describe('DELETE /api/tasks/:id', () => {
@@ -453,6 +471,14 @@ export function createTask(req: Request, res: Response): void {
 
 export function updateTask(req: Request, res: Response): void {
   const input = (req.body ?? {}) as UpdateTaskInput;
+  if (input.title !== undefined && (typeof input.title !== 'string' || input.title.trim().length === 0)) {
+    res.status(400).json({ error: 'title must be a non-empty string' });
+    return;
+  }
+  if (input.done !== undefined && typeof input.done !== 'boolean') {
+    res.status(400).json({ error: 'done must be a boolean' });
+    return;
+  }
   const updated = taskRepository.update(req.params.id, input);
   if (!updated) {
     res.status(404).json({ error: 'Task not found' });
@@ -522,7 +548,7 @@ export const app = createApp();
 npx vitest run
 ```
 
-Expected: PASS — 6 model tests + 11 API tests (17 total), all green.
+Expected: PASS — 6 model tests + 13 API tests (19 total), all green.
 
 - [ ] **Step 7: Typecheck**
 
