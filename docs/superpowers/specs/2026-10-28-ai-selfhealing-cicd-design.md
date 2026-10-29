@@ -1,8 +1,17 @@
 # AI Self-Healing CI/CD Demo — Design Spec
 
 **Date:** 2026-10-28
-**Status:** Approved
+**Status:** Approved (as-built notes below)
 **Repo:** `agents-ci-cd`
+
+> **As-built notes (2026-10-30):** implemented per this spec with these
+> deltas — the seed/task push (GITHUB_TOKEN) cannot itself trigger
+> `quality-gate.yml`, so `demo.yml` carries its own `gate-and-fix` job;
+> the conventions gate ships without `import/order`; `model` is passed to
+> claude-code only; the dispatcher edits files only — the workflow records
+> and pushes commits; `gate-and-fix.sh` takes an optional 3rd
+> branch argument (needed for workflow_dispatch, where `GITHUB_REF_NAME`
+> names the dispatching branch).
 
 ## Purpose
 
