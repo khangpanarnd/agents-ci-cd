@@ -1,0 +1,6 @@
+{
+  "agent": "claude-code",
+  "maxRetries": 3,
+  "model": "claude-sonnet-5",
+  "baseBranch": "develop"
+}
