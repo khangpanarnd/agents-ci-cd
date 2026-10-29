@@ -1353,14 +1353,18 @@ Temporarily stub the agent so the loop can be exercised without an API key or ne
 ```bash
 cp scripts/ai-agent.mjs scripts/ai-agent.mjs.bak
 node scripts/seed-bugs.mjs
-# stub: make the "agent" revert the seeded files instead of calling any CLI
+# stub: make the "agent" revert the seeded files and exit 0 instead of
+# calling any CLI — the stub MUST exit before the real spawnSync(adapter.bin)
+# or a locally-installed agent CLI would really run
 node - <<'EOF'
 const fs = require('fs');
 let src = fs.readFileSync('scripts/ai-agent.mjs', 'utf8');
 src = src.replace(
   "const found = spawnSync('bash', ['-c', `command -v ${adapter.bin}`], { encoding: 'utf8' });",
   `const found = { status: 0 };
-  require('node:child_process').spawnSync('git', ['checkout', '--', 'src/controllers/task.controller.ts', 'tests/tasks.api.test.ts']);`
+  require('node:child_process').spawnSync('git', ['checkout', '--', 'src/controllers/task.controller.ts', 'tests/tasks.api.test.ts']);
+  console.log('STUB: reverted seeded files; skipping real agent run');
+  process.exit(0);`
 );
 fs.writeFileSync('scripts/ai-agent.mjs', src);
 EOF
