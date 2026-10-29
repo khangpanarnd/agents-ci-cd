@@ -1461,13 +1461,14 @@ permissions:
   contents: write
 
 concurrency:
-  group: quality-gate-${{ github.ref }}
+  group: quality-gate-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   gate-and-fix:
     name: Gates + AI self-fix loop
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout (PR head or pushed branch)
         uses: actions/checkout@v4
@@ -1487,8 +1488,8 @@ jobs:
       - name: Read AI config
         id: aiconfig
         run: |
-          echo "agent=$(jq -r '.agent' .ai-ci.json)" >> "$GITHUB_OUTPUT"
-          echo "maxRetries=$(jq -r '.maxRetries' .ai-ci.json)" >> "$GITHUB_OUTPUT"
+          echo "agent=$(jq -er '.agent' .ai-ci.json)" >> "$GITHUB_OUTPUT"
+          echo "maxRetries=$(jq -er '.maxRetries' .ai-ci.json)" >> "$GITHUB_OUTPUT"
 
       - name: Run gates with self-fix loop
         env:
@@ -1496,16 +1497,18 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
-        run: bash scripts/gate-and-fix.sh "${{ steps.aiconfig.outputs.agent }}" "${{ steps.aiconfig.outputs.maxRetries }}"
+          AGENT_ID: ${{ steps.aiconfig.outputs.agent }}
+          MAX_RETRIES: ${{ steps.aiconfig.outputs.maxRetries }}
+        run: bash scripts/gate-and-fix.sh "$AGENT_ID" "$MAX_RETRIES"
 ```
 
 - [ ] **Step 2: Validate YAML locally**
 
 ```bash
-node -e "const fs=require('fs');const y=require('js-yaml')" 2>/dev/null || npx --yes js-yaml .github/workflows/quality-gate.yml > /dev/null && echo "YAML OK"
+npx --yes js-yaml .github/workflows/quality-gate.yml > /dev/null && echo "YAML OK"
 ```
 
-Expected: `YAML OK` (js-yaml parses without error).
+Expected: `YAML OK`.
 
 - [ ] **Step 3: Commit**
 
@@ -1547,13 +1550,16 @@ permissions:
   contents: write
 
 concurrency:
-  group: demo-develop
+  # Aligned with quality-gate's develop group so demo runs serialize with
+  # gate runs on the same branch instead of racing concurrent writers.
+  group: quality-gate-develop
   cancel-in-progress: false
 
 jobs:
   implement:
     name: 'Mode: ${{ inputs.mode }}'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1598,6 +1604,7 @@ jobs:
     name: Gates + AI self-fix loop
     needs: implement
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1614,8 +1621,8 @@ jobs:
       - name: Read AI config
         id: aiconfig
         run: |
-          echo "agent=$(jq -r '.agent' .ai-ci.json)" >> "$GITHUB_OUTPUT"
-          echo "maxRetries=$(jq -r '.maxRetries' .ai-ci.json)" >> "$GITHUB_OUTPUT"
+          echo "agent=$(jq -er '.agent' .ai-ci.json)" >> "$GITHUB_OUTPUT"
+          echo "maxRetries=$(jq -er '.maxRetries' .ai-ci.json)" >> "$GITHUB_OUTPUT"
 
       - name: Run gates with self-fix loop
         env:
@@ -1623,7 +1630,9 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
-        run: bash scripts/gate-and-fix.sh "${{ steps.aiconfig.outputs.agent }}" "${{ steps.aiconfig.outputs.maxRetries }}"
+          AGENT_ID: ${{ steps.aiconfig.outputs.agent }}
+          MAX_RETRIES: ${{ steps.aiconfig.outputs.maxRetries }}
+        run: bash scripts/gate-and-fix.sh "$AGENT_ID" "$MAX_RETRIES"
 ```
 
 - [ ] **Step 2: Validate YAML locally**
