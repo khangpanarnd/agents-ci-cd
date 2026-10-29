@@ -1234,7 +1234,7 @@ const injections = [
     gate: 'test',
     file: 'tests/tasks.api.test.ts',
     from: '      expect(res.status).toBe(201);',
-    to: '      expect(res.status).toBe(200);',
+    to: '      expect(res.status).toBe(202);',
   },
 ];
 
