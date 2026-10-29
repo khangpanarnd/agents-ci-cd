@@ -811,7 +811,11 @@ for (const gate of GATES) {
   const result = spawnSync('npm', ['run', '--silent', gate.script], {
     encoding: 'utf8',
     shell: isWindows,
+    env: { ...process.env, NO_COLOR: '1' },
   });
+  if (result.error) {
+    console.log(`spawn error: ${result.error.message}`);
+  }
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`.trim();
   if (output) {
     console.log(output);
