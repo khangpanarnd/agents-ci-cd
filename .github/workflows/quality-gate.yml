@@ -10,13 +10,14 @@ permissions:
   contents: write
 
 concurrency:
-  group: quality-gate-${{ github.ref }}
+  group: quality-gate-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   gate-and-fix:
     name: Gates + AI self-fix loop
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout (PR head or pushed branch)
         uses: actions/checkout@v4
@@ -37,8 +38,8 @@ jobs:
       - name: Read AI config
         id: aiconfig
         run: |
-          echo "agent=$(jq -r '.agent' .ai-ci.json)" >> "$GITHUB_OUTPUT"
-          echo "maxRetries=$(jq -r '.maxRetries' .ai-ci.json)" >> "$GITHUB_OUTPUT"
+          echo "agent=$(jq -er '.agent' .ai-ci.json)" >> "$GITHUB_OUTPUT"
+          echo "maxRetries=$(jq -er '.maxRetries' .ai-ci.json)" >> "$GITHUB_OUTPUT"
 
       - name: Run gates with self-fix loop
         env:
@@ -46,4 +47,6 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
-        run: bash scripts/gate-and-fix.sh "${{ steps.aiconfig.outputs.agent }}" "${{ steps.aiconfig.outputs.maxRetries }}"
+          AGENT_ID: ${{ steps.aiconfig.outputs.agent }}
+          MAX_RETRIES: ${{ steps.aiconfig.outputs.maxRetries }}
+        run: bash scripts/gate-and-fix.sh "$AGENT_ID" "$MAX_RETRIES"
