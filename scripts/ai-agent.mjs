@@ -36,6 +36,7 @@ const RULES_PREAMBLE = [
   '2. Complete the task below with the smallest correct changes.',
   '   Never disable or weaken the quality gates (tsconfig, eslint configs, tests).',
   '   Never delete function parameters to silence unused-variable errors; rename with a `_` prefix instead.',
+  '   Do not run state-changing git commands (add/commit/push); the CI harness records and pushes the fix.',
   '3. Run `npm run gate` and make sure it passes before you finish.',
 ].join('\n');
 

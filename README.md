@@ -36,6 +36,7 @@ Any of four agents can do the fixing; you pick with one line of config.
 3. (Optional, for the PR part of the demo) Branch protection on `main`:
    Settings → Branches → add rule requiring the **Gates + AI self-fix loop**
    check. Then a `develop` → `main` PR blocks until the gate passes.
+   Same-repo branches only — fork PRs are not supported by the checkout.
 
 ## Running the demo
 
@@ -61,6 +62,7 @@ Any of four agents can do the fixing; you pick with one line of config.
 Change `"agent"` to `codex`, `copilot`, or `kiro`, commit, seed again — a
 different AI fights the same gates. `maxRetries` bounds the fix attempts
 without touching workflow YAML. (`model` is passed to claude-code only.)
+(`baseBranch` is informational — branch routing is fixed by the workflows.)
 
 ## Re-running the seed demo
 
@@ -72,6 +74,7 @@ the seeded bugs). Both exits mean the same thing: reset the app code from
 
 ```bash
 git checkout develop
+git pull --ff-only
 git checkout main -- src tests
 git commit -m "chore(demo): reset app code for re-seed"
 git push

@@ -20,6 +20,7 @@ export default tseslint.config(
     rules: {
       'no-console': 'error',
       'no-eval': 'error',
+      'no-new-func': 'error',
       'no-magic-numbers': [
         'error',
         { ignore: [-1, 0, 1, 3000, 200, 201, 204, 400, 404, 500] },
@@ -49,6 +50,7 @@ export default tseslint.config(
     rules: {
       'no-console': 'error',
       'no-eval': 'error',
+      'no-new-func': 'error',
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/require-await': 'error',
       '@typescript-eslint/no-unused-vars': [

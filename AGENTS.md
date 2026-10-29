@@ -1,8 +1,9 @@
 # AGENTS.md — Rulebook for AI coding agents
 
 Every AI agent working in this repository MUST follow these rules. The
-quality gates (`npm run gate`) enforce them mechanically; this file explains
-the intent behind them.
+quality gates (`npm run gate`) mechanically enforce the lint and typecheck
+rules; this file also records intent the gates cannot check (layering,
+naming, test coverage).
 
 ## Commands
 
