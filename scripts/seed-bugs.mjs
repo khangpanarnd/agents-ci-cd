@@ -39,7 +39,9 @@ const injections = [
 ];
 
 for (const injection of injections) {
-  const source = readFileSync(injection.file, 'utf8');
+  // Normalize CRLF → LF: multi-line `to` strings join with \n and would never
+  // match a CRLF-normalized working tree, blinding the idempotency guard.
+  const source = readFileSync(injection.file, 'utf8').replace(/\r\n/g, '\n');
   if (source.includes(injection.to)) {
     console.error(`Already seeded: ${injection.gate} (${injection.file}). Reset the branch first.`);
     process.exit(1);
