@@ -4,7 +4,7 @@
   "private": true,
   "description": "Demo: AI agents self-fix quality-gate failures in GitHub Actions",
   "engines": {
-    "node": ">=20"
+    "node": ">=20.11"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
