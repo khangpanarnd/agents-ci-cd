@@ -1378,33 +1378,36 @@ Expected: `syntax OK`, then a usage error (`agent id required`).
 
 - [ ] **Step 3: Local smoke of the loop control flow (no AI, no push)**
 
-Temporarily stub the agent so the loop can be exercised without an API key or network. `AI_FIX_NO_PUSH=1` (the guard added above) keeps the smoke test off `origin`:
+Temporarily stub the agent so the loop can be exercised without an API key or network. `AI_FIX_NO_PUSH=1` (the guard added above) keeps the smoke test off `origin`. Stub notes: `spawnSync` is already imported (the module is ESM — `require` is not defined); the revert uses `git checkout HEAD~1 --` + `git reset --` (plain `checkout --` would restore the SEEDED content from the index); the wip commit stages ONLY the seeded files and stubbed dispatcher (NOT the new loop script) so the final reset cannot delete it; and restore resets to the captured original SHA (HEAD~1 after the loop still points at the wip commit):
 
 ```bash
+ORIG=$(git rev-parse HEAD)
 cp scripts/ai-agent.mjs scripts/ai-agent.mjs.bak
 node scripts/seed-bugs.mjs
-# stub: make the "agent" revert the seeded files and exit 0 instead of
-# calling any CLI — the stub MUST exit before the real spawnSync(adapter.bin)
-# or a locally-installed agent CLI would really run
+# stub: revert the seeded files and exit 0 instead of calling any CLI —
+# the stub MUST exit before the real spawnSync(adapter.bin) or a
+# locally-installed agent CLI would really run
 node - <<'EOF'
 const fs = require('fs');
 let src = fs.readFileSync('scripts/ai-agent.mjs', 'utf8');
 src = src.replace(
   "const found = spawnSync('bash', ['-c', `command -v ${adapter.bin}`], { encoding: 'utf8' });",
   `const found = { status: 0 };
-  require('node:child_process').spawnSync('git', ['checkout', '--', 'src/controllers/task.controller.ts', 'tests/tasks.api.test.ts']);
+  spawnSync('git', ['checkout', 'HEAD~1', '--', 'src/controllers/task.controller.ts', 'tests/tasks.api.test.ts']);
+  spawnSync('git', ['reset', '-q', '--', 'src/controllers/task.controller.ts', 'tests/tasks.api.test.ts']);
   console.log('STUB: reverted seeded files; skipping real agent run');
   process.exit(0);`
 );
 fs.writeFileSync('scripts/ai-agent.mjs', src);
 EOF
-git add -A && git commit -q -m "wip: local loop smoke (temp)"
+git add src tests scripts/ai-agent.mjs
+git commit -q -m "wip: local loop smoke (temp)"
 AI_FIX_NO_PUSH=1 ANTHROPIC_API_KEY=dummy bash scripts/gate-and-fix.sh stub 1; echo "loop-exit=$?"
 mv scripts/ai-agent.mjs.bak scripts/ai-agent.mjs
-git reset --hard HEAD~1
+git reset --hard "$ORIG"
 ```
 
-Expected: gate run 1/2 fails, the stub "agent" reverts the seeded files, a `[ai-fix stub attempt 1/1] [skip ci]` commit is created (push skipped with the dry-run message), gate run 2/2 passes, `loop-exit=0`. The final `git reset --hard HEAD~1` drops the temp commit and restores the pristine tree. Verify with `git status --short` (clean) and `npm run gate` (ALL PASSED).
+Expected: gate run 1/2 fails, the stub "agent" reverts the seeded files (log line `STUB: reverted seeded files; skipping real agent run`), a `[ai-fix stub attempt 1/1] [skip ci]` commit is created (push skipped with the dry-run message), gate run 2/2 passes, `loop-exit=0`. The final `git reset --hard "$ORIG"` drops both temp commits and restores the pristine tree with `scripts/gate-and-fix.sh` still present (untracked). Verify with `git status --short` (only `?? scripts/gate-and-fix.sh`) and `npm run gate` (ALL PASSED).
 
 - [ ] **Step 4: Restore and verify clean state**
 
